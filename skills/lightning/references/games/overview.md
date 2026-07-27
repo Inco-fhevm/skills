@@ -83,18 +83,31 @@ Filled example (Texas Hold'em): *"(a) every player sees the community cards and 
 
 Note (a)–(d) map straight onto the decision tree: (a)+(b) are **Q1 (what's secret)**, (c) is **Q2 (when does it reveal)**, and (d) is the settlement path.
 
-## Game jam: build a game with AI
+## Game jam: build a deck-shaped game fast
 
-At a hackathon, forking a working repo beats scaffolding from zero. The **[ConfidentialDeck template](https://github.com/Inco-fhevm/confidential-deck-template)** is a full Hardhat + Next.js project: four example games (War, Blackjack, Raffle, Mafia) on one base contract, plus a demo dApp. [Play it live](https://confidential-deck.vercel.app). Fork it when your idea is card, deck, lottery, or role shaped; use the from-scratch path above when it is not.
+**Scope first.** This path is for games that reduce to the *deck shape*: a shuffle of hidden values that get dealt out. That is three families:
 
-The AI-first fast path:
+- **Card hands:** poker, blackjack, war, hearts, gin. Private cards, revealed on the game's schedule.
+- **Hidden roles:** mafia, werewolf, secret-team assignment. One private value per player, usually never revealed on-chain.
+- **Random draws:** raffle, lottery, gacha or pack opening. One (or a few) hidden winners pulled from a shuffle.
 
-1. **Clone it and hand the repo to your AI.** It ships an `AGENTS.md` that briefs an assistant on the kit, the per-game privacy model, and the frontend, so "add a game like X" lands with the right privacy boundary on the first try.
-2. **Pick the closest example.** War (private hand, reveal at showdown), Blackjack (face-up hand, hidden dealer and shoe), Raffle (hidden winner until the draw), Mafia (per-player secret role). Copy the nearest one.
-3. **Inherit the kit.** `contract MyGame is ConfidentialDeck` gives the five moves (shuffle, draw, private deal, public reveal, attested settle), so you write only rules. Kit walkthrough: [docs.inco.org/games/confidential-deck](https://docs.inco.org/games/confidential-deck).
-4. **Still run the decision tree first.** The template fixes the boundary for *its* games; yours may differ. Answer Step 1 (what is secret, when it reveals) before you change reveal timing.
+If your game is not one of these, do NOT fork the template; use the from-scratch path above and route by the list at the end of this section.
 
-Not card shaped? [Incasino](https://github.com/Inco-fhevm/incasino) is a six-game `e.rand()` casino that shows the play-then-settle loop, and the from-scratch path above covers anything else.
+**Fork the starter.** The **[ConfidentialDeck template](https://github.com/Inco-fhevm/confidential-deck-template)** is a Hardhat + Next.js repo with four worked games (War, Blackjack, Raffle, Mafia) on one `ConfidentialDeck` base contract, plus a demo dApp. [Play it live](https://confidential-deck.vercel.app).
+
+AI-first steps:
+
+1. **Clone it and hand the repo to your AI.** It ships an `AGENTS.md` that briefs an assistant on the kit, the per-game privacy model, and the frontend, so a change lands with the right privacy boundary on the first try.
+2. **Start from the closest of the four.** War (private hand, reveal at showdown), Blackjack (face-up hand, hidden dealer and shoe), Raffle (one hidden winner), Mafia (per-player secret role). Copy the nearest and change the rules.
+3. **Inherit the kit.** `contract MyGame is ConfidentialDeck` gives the five moves (shuffle, draw, private deal, public reveal, attested settle), so you write only rules. Walkthrough: [docs.inco.org/games/confidential-deck](https://docs.inco.org/games/confidential-deck).
+4. **Re-check the reveal timing.** The template fixes what is secret for *its* games; if yours opens the secret at a different moment, run Step 1 before you change it.
+
+**Not deck-shaped? Route here instead:**
+
+- Per-move RNG casino (dice, slots, coin flip, plinko) → the `e.rand()` play-then-settle pattern; see [Incasino](https://github.com/Inco-fhevm/incasino).
+- An encrypted board opened one cell per move (minesweeper, battleship, fog of war) → the shuffle-a-board archetype in [archetypes.md](archetypes.md) and [scripts/games/mines/](../../scripts/games/mines/).
+- A hidden word or code guessed over turns (hangman, wordle, mastermind) → encrypted input + `e.eq`; see [scripts/games/hangman/](../../scripts/games/hangman/IncoHangMan.sol).
+- Anything else → the from-scratch path above, driven by [archetypes.md](archetypes.md).
 
 ## The core loop: encrypt → play → reveal → settle
 
