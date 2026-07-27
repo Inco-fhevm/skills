@@ -83,6 +83,19 @@ Filled example (Texas Hold'em): *"(a) every player sees the community cards and 
 
 Note (a)–(d) map straight onto the decision tree: (a)+(b) are **Q1 (what's secret)**, (c) is **Q2 (when does it reveal)**, and (d) is the settlement path.
 
+## Game jam: build a game with AI
+
+At a hackathon, forking a working repo beats scaffolding from zero. The **[ConfidentialDeck template](https://github.com/Inco-fhevm/confidential-deck-template)** is a full Hardhat + Next.js project: four example games (War, Blackjack, Raffle, Mafia) on one base contract, plus a demo dApp. [Play it live](https://confidential-deck.vercel.app). Fork it when your idea is card, deck, lottery, or role shaped; use the from-scratch path above when it is not.
+
+The AI-first fast path:
+
+1. **Clone it and hand the repo to your AI.** It ships an `AGENTS.md` that briefs an assistant on the kit, the per-game privacy model, and the frontend, so "add a game like X" lands with the right privacy boundary on the first try.
+2. **Pick the closest example.** War (private hand, reveal at showdown), Blackjack (face-up hand, hidden dealer and shoe), Raffle (hidden winner until the draw), Mafia (per-player secret role). Copy the nearest one.
+3. **Inherit the kit.** `contract MyGame is ConfidentialDeck` gives the five moves (shuffle, draw, private deal, public reveal, attested settle), so you write only rules. Kit walkthrough: [docs.inco.org/games/confidential-deck](https://docs.inco.org/games/confidential-deck).
+4. **Still run the decision tree first.** The template fixes the boundary for *its* games; yours may differ. Answer Step 1 (what is secret, when it reveals) before you change reveal timing.
+
+Not card shaped? [Incasino](https://github.com/Inco-fhevm/incasino) is a six-game `e.rand()` casino that shows the play-then-settle loop, and the from-scratch path above covers anything else.
+
 ## The core loop: encrypt → play → reveal → settle
 
 Every confidential game on Inco — whatever the genre — is the same four-stage loop:
