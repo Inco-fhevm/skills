@@ -41,8 +41,10 @@ Base Sepolia USDC comes from the [Circle faucet](https://faucet.circle.com/). Ev
 ## Install and pick a layer
 
 ```bash
-npm install @inco/ctoken
+npm install @inco/ctoken viem @inco/lightning-js
 ```
+
+This skill targets `@inco/ctoken` **0.2.x**. 0.2.0 removed `CTokenClient.browser()` / `.node()` and the `indexerUrl` option; there is one `new CTokenClient(...)` for Node and browsers, `publicClient` is required, and the indexer is opt-in via `indexer`. Migrating from 0.1.x: https://docs.inco.org/ctoken/migration.
 
 | Layer | Import | Use it when |
 |---|---|---|
@@ -55,10 +57,11 @@ npm install @inco/ctoken
 ```ts
 import { CTokenClient } from "@inco/ctoken";
 
-const client = CTokenClient.browser({
+const client = new CTokenClient({
   network: "base", // or "baseSepolia"
-  walletClient,
-  indexerUrl: "https://api.ctoken.inco.org/api",
+  publicClient,    // required: your viem read client for that chain
+  walletClient,    // your signer; required for wallet reads, sessions, and writes
+  indexer: true,   // off by default; true = hosted indexer, { url } = your own
 });
 
 await client.deposit({ token: usdc, amount: "100" });           // wrap
@@ -66,20 +69,23 @@ await client.confidentialSend({ token: usdc, to, amount: "25" });
 await client.withdraw({ token: usdc, amount: "10" });           // unwrap
 
 const balances = await client.balancesSettled({ tokens: [usdc] });
-// { value: 65, pending: false }, or pending: true while settling
+// balances[usdc] -> { value: 65, raw, formatted, decimals, pending: false }
+// or pending: true while the ciphertext is still settling
 
-const history = await client.history({ page: 1 });
-const prices = await client.prices([usdc]);
+const exact = await client.balanceExact({ token: usdc });       // { raw, formatted, decimals }
+const history = await client.history({ page: 1 });              // needs indexer
+const prices = await client.prices([usdc]);                     // needs indexer
 ```
 
-For scripts and backends use `CTokenClient.node({ network, privateKey, indexerUrl })`. Node signs with the key directly, so no sessions and no popups. Own deployment? Pass `contracts` and `sessionVerifier` to override.
+Node and browsers use the same constructor. For scripts and backends build the `walletClient` yourself (`createWalletClient({ account: privateKeyToAccount(key), chain, transport })`); the SDK does not accept raw private keys. Own deployment? Pass `contracts` and `sessionVerifier` to override.
 
 ## React hooks
 
 ```tsx
 import { CTokenProvider } from "@inco/ctoken/react";
 
-<CTokenProvider network="base" indexerUrl="https://api.ctoken.inco.org/api">
+// Under QueryClientProvider. Omit walletClient to use the surrounding wagmi provider.
+<CTokenProvider network="base" publicClient={publicClient} indexer>
   <App />
 </CTokenProvider>
 ```
@@ -88,7 +94,7 @@ import { CTokenProvider } from "@inco/ctoken/react";
 import { useBalances, useDeposit, useConfidentialSend } from "@inco/ctoken/react";
 ```
 
-Hooks: `useCToken`, `useTokens`, `useResolvedTokens`, `useAssets`, `useBalances`, `useBalance`, `usePublicBalance`, `useDeposit`, `useApprove`, `useWithdraw`, `useConfidentialSend`, `useDecrypt`, `useHistory`, `useChainGuard`. Built on wagmi and react-query.
+Hooks: `useCToken`, `useTokens`, `useResolvedTokens`, `useAssets`, `useBalances`, `useBalancesSettled`, `useBalance`, `useBalanceExact`, `usePublicBalances`, `usePublicBalance`, `usePublicBalanceExact`, `useDeposit`, `useApprove`, `useWithdraw`, `useConfidentialSend`, `useDecrypt`, `useHistory`, `useChainGuard`. Built on wagmi and react-query.
 
 ## UI kit
 
@@ -119,6 +125,7 @@ Open, rate limited per IP, localhost origins always allowed. Endpoints and seman
 | "This Safe can decrypt directly" | Smart accounts always go through sessions. |
 | "Parse the amount from the indexer" | The indexer only serves handles, plaintext never leaves the TEE. |
 | "Hardcode the addresses" | Pass `network`, the SDK ships the addresses. |
+| "`CTokenClient.browser()` / `indexerUrl`" | Gone in 0.2.0. `new CTokenClient({ network, publicClient, walletClient, indexer })`. |
 | "cToken uses FHE" | It is TEE-based. Say TEE. |
 
 ## Docs
