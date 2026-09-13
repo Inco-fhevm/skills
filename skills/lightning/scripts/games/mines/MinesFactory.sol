@@ -10,7 +10,7 @@ pragma solidity ^0.8.30;
 
 import {Mines} from "./Mines.sol";
 import {MinesMath} from "./MinesMath.sol";
-import {inco} from "@inco/lightning/src/Lib.sol";
+import {inco, ETypes} from "@inco/lightning/src/Lib.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract MinesFactory is Ownable {
@@ -88,6 +88,14 @@ contract MinesFactory is Ownable {
         return address(this).balance >= totalActiveLiability + maxPayout;
     }
 
+    /// @notice Inco fee needed to build and shuffle a `size` x `size` board.
+    /// Mirrors `Mines.boardSetupFee()`; the frontend adds this to the bet.
+    function getInitFee(uint256 size) public view returns (uint256) {
+        uint256 totalTiles = size * size;
+        require(totalTiles <= type(uint16).max, "board too large");
+        return 3 * inco.getEListFee(uint16(totalTiles), ETypes.Bool);
+    }
+
     function getTotalActiveLiability() public view returns (uint256) {
         return totalActiveLiability;
     }
@@ -107,7 +115,7 @@ contract MinesFactory is Ownable {
     }
 
     /// @notice Create a new Mines game and initialize its board atomically.
-    /// msg.value must cover `betAmount + initFee`. Excess is refunded.
+    /// msg.value must cover `betAmount + getInitFee(size)`. Excess is refunded.
     function createMinesContract(
         uint256 size,
         uint256 bombs,
@@ -119,7 +127,7 @@ contract MinesFactory is Ownable {
         require(bombs > 0, "need bomb");
         require(bombs < size * size, "bombs >= total");
 
-        uint256 initFee = inco.getFee();
+        uint256 initFee = getInitFee(size);
         require(msg.value >= betAmount + initFee, "insufficient payment");
 
         // Sweep up to CLEANUP_CAP_DEFAULT expired games to free their liability.
