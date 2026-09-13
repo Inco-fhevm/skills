@@ -11,7 +11,14 @@ pragma solidity ^0.8.30;
 import {Mines} from "./Mines.sol";
 import {MinesMath} from "./MinesMath.sol";
 import {inco} from "@inco/lightning/src/Lib.sol";
+import {DecryptionAttestation} from "@inco/lightning/src/lightning-parts/DecryptionAttester.types.sol";
+import {asBool} from "@inco/lightning/src/shared/TypeUtils.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+
+interface IMines {
+    function latestAccumHandle() external view returns (bytes32);
+    function pickCount() external view returns (uint256);
+}
 
 contract MinesFactory is Ownable {
     struct GameInfo {
@@ -38,6 +45,11 @@ contract MinesFactory is Ownable {
     uint256 public totalActiveLiability;
 
     uint256 public constant GAME_TIMEOUT = 15 minutes;
+    // After GAME_TIMEOUT a game can only be closed WITH an attestation over the
+    // revealed accumulator (refund if no bomb was hit, forfeit if one was).
+    // After GAME_TIMEOUT + REFUND_GRACE an unattested close forfeits the bet,
+    // so liability can always be released even if nobody brings a proof.
+    uint256 public constant REFUND_GRACE = 1 hours;
     uint256 public constant CLEANUP_CAP_DEFAULT = 16; // max expired games swept per createMinesContract
 
     // OZ-style reentrancy guard (1↔2 instead of 0↔1) — never lets the slot fall
@@ -58,6 +70,7 @@ contract MinesFactory is Ownable {
     event GamePayout(address indexed player, address indexed contractAddress, uint256 amount);
     event GameExpired(address indexed player, address indexed contractAddress, uint256 betAmount);
     event GameRefunded(address indexed player, address indexed contractAddress, uint256 refunded);
+    event GameForfeited(address indexed player, address indexed contractAddress, uint256 betAmount);
     event GameStateUpdated(address indexed contractAddress, address indexed player, string state);
 
     constructor() Ownable(msg.sender) {}
@@ -227,6 +240,12 @@ contract MinesFactory is Ownable {
         return block.timestamp >= gameInfo.createdAt + GAME_TIMEOUT;
     }
 
+    /// @notice True once an expired game may be closed without an attestation.
+    function isRefundGraceOver(address contractAddress) public view returns (bool) {
+        GameInfo memory gameInfo = gameInfoByContract[contractAddress];
+        return block.timestamp >= gameInfo.createdAt + GAME_TIMEOUT + REFUND_GRACE;
+    }
+
     function _removeFromActiveGames(address contractAddress) internal {
         uint256 index = activeGameIndex[contractAddress];
         uint256 lastIndex = activeGameAddresses.length - 1;
@@ -240,8 +259,9 @@ contract MinesFactory is Ownable {
     }
 
     /// @notice Public, paginated cleanup. Anyone can call to sweep up to `maxIterations`
-    /// expired games. Use this to amortize cleanup cost across many callers and avoid
-    /// gas-DoS in `createMinesContract`.
+    /// games that can be closed without an attestation (see `expireGame`). Use this
+    /// to amortize cleanup cost across many callers and avoid gas-DoS in
+    /// `createMinesContract`.
     function cleanupExpiredGames(uint256 maxIterations) public returns (uint256) {
         return _cleanupExpiredGames(maxIterations);
     }
@@ -252,8 +272,8 @@ contract MinesFactory is Ownable {
         while (i < activeGameAddresses.length && expiredCount < maxIterations) {
             address gameAddress = activeGameAddresses[i];
             GameInfo storage gameInfo = gameInfoByContract[gameAddress];
-            if (gameInfo.isActive && isGameExpired(gameAddress)) {
-                _expireAndRefund(gameAddress, gameInfo);
+            if (gameInfo.isActive && _canCloseUnattested(gameAddress)) {
+                _closeUnattested(gameAddress, gameInfo);
                 unchecked { ++expiredCount; }
                 // don't increment i — the swap brought a new entry to position i
             } else {
@@ -263,14 +283,72 @@ contract MinesFactory is Ownable {
         return expiredCount;
     }
 
-    /// @notice Expire a single game and refund the player's bet.
-    /// Permissionless (anyone can poke), but consequences are fair to the player
-    /// (bet returned) rather than confiscatory.
-    function expireGame(address contractAddress) external nonReentrant {
+    /// @notice Expire a game WITH an attestation over its revealed accumulator.
+    /// Permissionless. A slow-but-safe player (no bomb hit) gets the bet back;
+    /// a player who hit a bomb and simply walked away forfeits it. Without this
+    /// gate a losing player could always wait out the timeout for a full refund,
+    /// which makes the house edge negative.
+    function expireGameWithAttestation(
+        address contractAddress,
+        DecryptionAttestation calldata accumAttestation,
+        bytes[] calldata signatures
+    ) external nonReentrant {
         GameInfo storage gameInfo = gameInfoByContract[contractAddress];
         require(gameInfo.isActive, "game not active");
         require(isGameExpired(contractAddress), "not yet expired");
-        _expireAndRefund(contractAddress, gameInfo);
+        require(IMines(contractAddress).pickCount() > 0, "no picks: use expireGame");
+        require(
+            accumAttestation.handle == IMines(contractAddress).latestAccumHandle(),
+            "stale attestation"
+        );
+        require(
+            inco.incoVerifier().isValidDecryptionAttestation(accumAttestation, signatures),
+            "bad sig"
+        );
+        if (asBool(accumAttestation.value)) {
+            _forfeit(contractAddress, gameInfo);
+        } else {
+            _expireAndRefund(contractAddress, gameInfo);
+        }
+    }
+
+    /// @notice Expire a game WITHOUT an attestation. Permissionless.
+    /// - No tile was ever opened: refund right after GAME_TIMEOUT (the accumulator
+    ///   was never revealed, so no attestation can exist; nothing was risked).
+    /// - Otherwise only after GAME_TIMEOUT + REFUND_GRACE, and the bet is
+    ///   forfeited: the player had the whole grace window to bring the public
+    ///   "no bomb" attestation via `expireGameWithAttestation`.
+    function expireGame(address contractAddress) external nonReentrant {
+        GameInfo storage gameInfo = gameInfoByContract[contractAddress];
+        require(gameInfo.isActive, "game not active");
+        require(_canCloseUnattested(contractAddress), "attestation required");
+        _closeUnattested(contractAddress, gameInfo);
+    }
+
+    function _canCloseUnattested(address contractAddress) internal view returns (bool) {
+        if (!isGameExpired(contractAddress)) return false;
+        if (IMines(contractAddress).pickCount() == 0) return true;
+        return isRefundGraceOver(contractAddress);
+    }
+
+    function _closeUnattested(address contractAddress, GameInfo storage gameInfo) internal {
+        if (IMines(contractAddress).pickCount() == 0) {
+            _expireAndRefund(contractAddress, gameInfo);
+        } else {
+            _forfeit(contractAddress, gameInfo);
+        }
+    }
+
+    function _forfeit(address contractAddress, GameInfo storage gameInfo) internal {
+        address player = gameInfo.player;
+        gameInfo.isActive = false;
+        gameInfo.playerWon = false;
+        gameInfo.paidAmount = 0;
+        totalActiveLiability -= gameInfo.maxPayout;
+        _removeFromActiveGames(contractAddress);
+
+        emit GameForfeited(player, contractAddress, gameInfo.betAmount);
+        emit GameStateUpdated(contractAddress, player, "forfeited");
     }
 
     function _expireAndRefund(address contractAddress, GameInfo storage gameInfo) internal {
