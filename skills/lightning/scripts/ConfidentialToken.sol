@@ -16,8 +16,13 @@ contract ConfidentialToken {
 
     constructor() {
         owner = msg.sender;
-        // Mint 1000 tokens to deployer (9 decimals = GWEI)
-        balanceOf[msg.sender] = uint256(1000 * 1e9).asEuint256();
+        // Mint 1000 tokens to deployer (9 decimals = GWEI).
+        // asEuint256 only grants *transient* access, so the handle still needs
+        // the persistent grants or the deployer can neither spend nor decrypt it.
+        euint256 initialBalance = uint256(1000 * 1e9).asEuint256();
+        balanceOf[msg.sender] = initialBalance;
+        initialBalance.allow(msg.sender);
+        initialBalance.allowThis();
     }
 
     // ─── Mint ───────────────────────────────────────────────
@@ -85,10 +90,12 @@ contract ConfidentialToken {
         // Multiplexer pattern: transfer value if sufficient, 0 otherwise
         euint256 transferredValue = success.select(value, uint256(0).asEuint256());
 
+        // Write the sender side before reading the receiver side so a self-transfer
+        // (from == to) nets to zero instead of re-adding the amount on top of the
+        // stale pre-transfer balance.
         euint256 senderNewBalance = balanceOf[from].sub(transferredValue);
-        euint256 receiverNewBalance = balanceOf[to].add(transferredValue);
-
         balanceOf[from] = senderNewBalance;
+        euint256 receiverNewBalance = balanceOf[to].add(transferredValue);
         balanceOf[to] = receiverNewBalance;
 
         // Grant access to see new balances
@@ -117,13 +124,12 @@ contract ConfidentialToken {
 
         euint256 transferredValue = success.select(value, uint256(0).asEuint256());
 
-        // Update balances
+        // Update balances (sender write before receiver read, see _transfer)
         euint256 senderNewBalance = balanceOf[from].sub(transferredValue);
-        euint256 receiverNewBalance = balanceOf[to].add(transferredValue);
-        euint256 newAllowance = currentAllowance.sub(transferredValue);
-
         balanceOf[from] = senderNewBalance;
+        euint256 receiverNewBalance = balanceOf[to].add(transferredValue);
         balanceOf[to] = receiverNewBalance;
+        euint256 newAllowance = currentAllowance.sub(transferredValue);
         allowances[from][msg.sender] = newAllowance;
 
         // Access control

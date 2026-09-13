@@ -227,10 +227,11 @@ function _transfer(address to, euint256 value) internal returns (ebool success) 
     success = balanceOf[msg.sender].ge(value);
     euint256 transferredValue = success.select(value, uint256(0).asEuint256());
 
+    // Write the sender side BEFORE reading the receiver side: with to == msg.sender
+    // the old order re-adds `transferredValue` on top of the stale balance and mints tokens.
     euint256 senderNew = balanceOf[msg.sender].sub(transferredValue);
-    euint256 receiverNew = balanceOf[to].add(transferredValue);
-
     balanceOf[msg.sender] = senderNew;
+    euint256 receiverNew = balanceOf[to].add(transferredValue);
     balanceOf[to] = receiverNew;
 
     // Access control - ALL of these are required
@@ -392,18 +393,21 @@ function transfer(address to, euint256 value) public returns (ebool success) {
 require(msg.sender.isAllowed(value), "unauthorized value handle access");
 ```
 
-### 3. Think About Information Leakage
+### 3. Order Balance Writes Before Reads in Transfers
+Read `balanceOf[to]` only after `balanceOf[from]` has been written. If both are read first, a self-transfer (`to == from`) ends with `old + value` — the sender side is silently overwritten and the token supply inflates. The same applies to `transferFrom`.
+
+### 4. Think About Information Leakage
 - Public price + private swap amount = deducible amount
 - Continuously updated highest bidder = deducible highest bid
 - Execution path differences leak data
 
-### 4. Be Careful with delegatecall
+### 5. Be Careful with delegatecall
 A delegatecalled contract can decrypt any ciphertext your contract holds.
 
-### 5. Always Verify Handles in Attestations
+### 6. Always Verify Handles in Attestations
 Signature verification alone is NOT enough. Always check `decryption.handle` matches the expected handle.
 
-### 6. Use 9 Decimals for Confidential Tokens
+### 7. Use 9 Decimals for Confidential Tokens
 Standard is GWEI (1e9) not WAD (1e18) for confidential fungible tokens.
 
 ---
