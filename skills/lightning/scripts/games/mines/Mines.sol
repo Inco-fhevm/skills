@@ -214,11 +214,15 @@ contract Mines {
         emit PlayerCashedOut(winnings);
     }
 
+    /// @notice Settle a loss. Permissionless: the accumulator is publicly
+    /// revealed on every pick, so anyone (the house, a keeper, the player)
+    /// can fetch the attestation and close the game. A player who hit a bomb
+    /// has no incentive to call this themselves — see MinesFactory.expireGame
+    /// for what happens if nobody does before the timeout.
     function concedeLoss(
         DecryptionAttestation calldata accumAttestation,
         bytes[] calldata signatures
     ) external gameActive nonReentrant {
-        require(msg.sender == player, "only player");
         require(openedTiles.length > 0, "need a pick");
         require(accumAttestation.handle == latestAccumHandle, "stale attestation");
         require(
@@ -240,6 +244,10 @@ contract Mines {
 
     function getOpenedTiles() external view returns (uint256[] memory) {
         return openedTiles;
+    }
+
+    function pickCount() external view returns (uint256) {
+        return openedTiles.length;
     }
 
     function getGameInfo()
