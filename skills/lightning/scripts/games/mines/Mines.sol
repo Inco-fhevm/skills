@@ -115,13 +115,23 @@ contract Mines {
         );
     }
 
+    /// @notice Total Inco fee charged by `initBoard`. Every elist construction
+    /// op is priced per element (`inco.getEListFee(len, type)`), not one flat
+    /// `inco.getFee()`: newEList(bombs) + newEList(safes) + concat + shuffle
+    /// = 3 * totalTiles * BIT_FEE for a Bool list. One flat fee only covers
+    /// boards up to 85 tiles (9x9); anything larger runs out of funds.
+    function boardSetupFee() public view returns (uint256) {
+        uint256 totalTiles = boardSize * boardSize;
+        return 3 * inco.getEListFee(uint16(totalTiles), ETypes.Bool);
+    }
+
     /// @notice Factory-only initialization. Bundled atomically inside
     /// `MinesFactory.createMinesContract` so `boardReady` is true before any
     /// other caller can reach this contract.
     function initBoard() external payable {
         require(!boardReady, "already initialized");
         require(msg.sender == factory, "only factory"); // dead `player` branch removed
-        require(msg.value >= inco.getFee(), "fee");
+        require(msg.value >= boardSetupFee(), "fee");
 
         uint256 totalTiles = boardSize * boardSize;
         uint256 safeTiles = totalTiles - totalBombs;
@@ -162,8 +172,8 @@ contract Mines {
     }
 
     /// @notice Open a tile. NOT payable — none of the encrypted ops we use
-    /// here charge an Inco fee (only `eRand`/`listShuffle` do, neither of
-    /// which `pickTile` calls). Caller pays gas only.
+    /// here charge an Inco fee (only randomness and elist construction ops
+    /// do, none of which `pickTile` calls). Caller pays gas only.
     function pickTile(uint256 pos) external gameActive nonReentrant {
         require(msg.sender == player, "only player");
         require(boardReady, "not ready");

@@ -156,7 +156,7 @@ newValue.allowThis();         // Contract can use in future txs
 Forgetting `allowThis()` = contract loses access to the handle permanently.
 
 ### Fee Payment
-Every `newEuint256`/`newEbool`/`newEaddress` call (and `rand`/`randBounded`/`shuffle`) charges `inco.getFee()`, drawn from the **contract's balance**. Either the user pays it (`payable` + `require(msg.value >= inco.getFee())`) or you **pre-fund the contract to sponsor it** (gasless for the caller). See [Fee Payment](references/solidity-reference.md#fee-payment).
+Every `newEuint256`/`newEbool`/`newEaddress` call (and `rand`/`randBounded`) charges `inco.getFee()`, drawn from the **contract's balance**. Elist construction ops (`newEList`, `concat`, `shuffle`, …) charge `inco.getEListFee(len, type)` per element instead — budget for that, not one flat fee. Either the user pays it (`payable` + `require(msg.value >= inco.getFee())`) or you **pre-fund the contract to sponsor it** (gasless for the caller). See [Fee Payment](references/solidity-reference.md#fee-payment).
 
 ### Attestation Verification
 ```solidity
